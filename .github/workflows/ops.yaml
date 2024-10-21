@@ -1,0 +1,80 @@
+on:
+  workflow_call:
+    inputs:
+      codePath:
+        type: string
+        default: .
+      registry:
+        type: string
+        default: us-central1-docker.pkg.dev/gtan888/docker
+      containerName:
+        type: string
+        required: true
+      dockerfile:
+        type: string
+        default: Dockerfile
+
+      cloudrunName:
+        type: string
+      cloudrunRegion:
+        type: string
+        default: us-west1
+
+      k8s_ns:
+        type: string
+        default: services
+      k8s_deployment:
+        type: string
+      k8s_deployment_container:
+        type: string
+
+    secrets:
+      GHA888_GTAN888:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gcp auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GHA888_GTAN888 }}'      
+      - name: build and push
+        run: |
+          cd $GITHUB_WORKSPACE/${{ inputs.codePath }} || exit 1
+          ls -lha
+          buildtag=${{ inputs.registry }}/${{ inputs.containerName }}:${GITHUB_SHA::7}
+          echo "[info] buildtag: $buildtag"
+          docker build -q -t $buildtag -f ${{ inputs.dockerfile }} .
+          rootReg=$(echo ${{ inputs.registry }}| cut -d'/' -f1) && gcloud auth configure-docker -q $rootReg
+          echo "[info] pushing: $buildtag" && docker push $buildtag
+          
+          tags=("$GITHUB_RUN_NUMBER" "user.${{ github.actor }}-$GITHUB_RUN_NUMBER")
+          for tag in "${tags[@]}"; do
+            toTag="${{ inputs.registry }}/${{ inputs.containerName }}:$tag"
+            docker tag "$buildtag" "$toTag"
+            echo "[info] pushing: $toTag" && docker push "$toTag"
+          done
+
+  release_dev:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: gcp auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GHA888_GTAN888 }}'
+      - name: "push"
+        run: |
+          rootReg=$(echo ${{ inputs.registry }}| cut -d'/' -f1) && gcloud auth configure-docker -q $rootReg
+          fromTag=${{ inputs.registry }}/${{ inputs.containerName }}:${GITHUB_SHA::7}
+          docker pull $fromTag
+          tags=("dev-$GITHUB_RUN_NUMBER" "latest")
+          for tag in "${tags[@]}"; do
+            toTag="${{ inputs.registry }}/${{ inputs.containerName }}:$tag"
+            docker tag "$fromTag" "$toTag"
+            echo "[info] pushing: $toTag" && docker push "$toTag"
+          done
