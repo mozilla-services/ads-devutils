@@ -35,6 +35,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: ${{ !contains(github.actor, 'dependabot') }}
     steps:
       - uses: actions/checkout@v4
       - name: gcp auth
